@@ -71,7 +71,7 @@ public:
   BOOL write_point(const LASpoint* point);
   BOOL chunk();
 
-  BOOL update_header(const LASheader* header, BOOL use_inventory=FALSE, BOOL update_extra_bytes=FALSE);
+  BOOL update_header(const LASheader* header, BOOL use_inventory=FALSE, BOOL update_vlrs=FALSE);
   I64 close(BOOL update_npoints=TRUE);
   I64 tell();
 
