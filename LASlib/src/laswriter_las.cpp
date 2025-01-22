@@ -911,7 +911,7 @@ BOOL LASwriterLAS::chunk()
   return writer->chunk();
 }
 
-BOOL LASwriterLAS::update_header(const LASheader* header, BOOL use_inventory, BOOL update_extra_bytes)
+BOOL LASwriterLAS::update_header(const LASheader* header, BOOL use_inventory, BOOL update_vlrs)
 {
   I32 i;
   if (header == 0)
@@ -1170,42 +1170,76 @@ BOOL LASwriterLAS::update_header(const LASheader* header, BOOL use_inventory, BO
     }
   }
   stream->seekEnd();
-  if (update_extra_bytes)
+  if (update_vlrs)
   {
     if (header == 0)
     {
       LASMessage(LAS_ERROR, "header pointer is zero");
       return FALSE;
     }
-    if (header->number_attributes)
+
+    I64 start = header_start_position + header->header_size;
+    stream->seek(start);
+
+    // write variable length records variable after variable (to avoid alignment issues)
+
+    for (i = 0; i < header->number_of_variable_length_records; i++)
     {
-      I64 start = header_start_position + header->header_size;
-      for (i = 0; i < (I32)header->number_of_variable_length_records; i++)
+      // check variable length records contents
+
+      if (header->vlrs[i].reserved != 0xAABB)
       {
-        start += 54;
-        if ((header->vlrs[i].record_id == 4) && (strcmp(header->vlrs[i].user_id, "LASF_Spec") == 0))
+        //      LASMessage(LAS_WARNING, "wrong header->vlrs[%d].reserved: %d != 0xAABB", i, header->vlrs[i].reserved);
+      }
+
+      // write variable length records variable after variable (to avoid alignment issues)
+
+      if (!stream->put16bitsLE((const U8*)&(header->vlrs[i].reserved)))
+      {
+        LASMessage(LAS_ERROR, "writing header->vlrs[%d].reserved", i);
+        return FALSE;
+      }
+      if (!stream->putBytes((const U8*)header->vlrs[i].user_id, 16))
+      {
+        LASMessage(LAS_ERROR, "writing header->vlrs[%d].user_id", i);
+        return FALSE;
+      }
+      if (!stream->put16bitsLE((const U8*)&(header->vlrs[i].record_id)))
+      {
+        LASMessage(LAS_ERROR, "writing header->vlrs[%d].record_id", i);
+        return FALSE;
+      }
+      if (!stream->put16bitsLE((const U8*)&(header->vlrs[i].record_length_after_header)))
+      {
+        LASMessage(LAS_ERROR, "writing header->vlrs[%d].record_length_after_header", i);
+        return FALSE;
+      }
+      if (!stream->putBytes((const U8*)header->vlrs[i].description, 32))
+      {
+        LASMessage(LAS_ERROR, "writing header->vlrs[%d].description", i);
+        return FALSE;
+      }
+
+      // write the data following the header of the variable length record
+
+      if (header->vlrs[i].record_length_after_header)
+      {
+        if (header->vlrs[i].data)
         {
-          break;
+          if (!stream->putBytes((const U8*)header->vlrs[i].data, header->vlrs[i].record_length_after_header))
+          {
+            LASMessage(LAS_ERROR, "writing %d bytes of data from header->vlrs[%d].data", header->vlrs[i].record_length_after_header, i);
+            return FALSE;
+          }
         }
         else
         {
-          start += header->vlrs[i].record_length_after_header;
-        }
-      }
-      if (i == (I32)header->number_of_variable_length_records)
-      {
-        LASMessage(LAS_WARNING, "could not find extra bytes VLR for update");
-      }
-      else
-      {
-        stream->seek(start);
-        if (!stream->putBytes((U8*)header->vlrs[i].data, header->vlrs[i].record_length_after_header))
-        {
-          LASMessage(LAS_ERROR, "writing %d bytes of data from header->vlrs[%d].data", header->vlrs[i].record_length_after_header, i);
+          LASMessage(LAS_ERROR, "there should be %d bytes of data in header->vlrs[%d].data", header->vlrs[i].record_length_after_header, i);
           return FALSE;
         }
       }
     }
+
     stream->seekEnd();
   }
 
